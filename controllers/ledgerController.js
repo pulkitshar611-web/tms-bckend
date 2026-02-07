@@ -73,13 +73,13 @@ const getAgentBalance = async (req, res) => {
         { 'agentId._id': agentId }
       ]
     })
-    .populate('agent', 'name email phone branch _id')
-    .populate('agentId', 'name email phone branch _id');
+      .populate('agent', 'name email phone branch _id')
+      .populate('agentId', 'name email phone branch _id');
 
     const balance = ledger.reduce((sum, entry) => {
       const entryAgentId = entry.agent?._id?.toString() || entry.agentId?._id?.toString() || entry.agent?.toString() || entry.agentId?.toString();
       const requestedAgentId = agentId.toString();
-      
+
       // Only include entries that match the requested agent
       if (entryAgentId === requestedAgentId || entry.agent?.toString() === requestedAgentId || entry.agentId?.toString() === requestedAgentId) {
         if (entry.direction === 'Credit') {
@@ -238,7 +238,7 @@ const transferToAgent = async (req, res) => {
 
     const senderAgent = await User.findById(senderAgentId);
     const receiverAgent = await User.findById(receiverAgentId);
-    
+
     if (!senderAgent) {
       return res.status(404).json({ message: 'Sender agent not found' });
     }
@@ -262,11 +262,13 @@ const transferToAgent = async (req, res) => {
     }
 
     const currentDate = new Date();
+    const sharedTimestamp = Date.now();
+    const sharedLrNumber = `TRANSFER-${sharedTimestamp}`;
 
     // Debit entry for sender
     await Ledger.create({
       tripId: null,
-      lrNumber: `TRANSFER-${Date.now()}`,
+      lrNumber: sharedLrNumber,
       date: currentDate,
       description: `Payment transferred to ${receiverAgent.name}`,
       type: 'Agent Transfer',
@@ -292,7 +294,7 @@ const transferToAgent = async (req, res) => {
     // Credit entry for receiver
     await Ledger.create({
       tripId: null,
-      lrNumber: `TRANSFER-${Date.now()}`,
+      lrNumber: sharedLrNumber,
       date: currentDate,
       description: `Payment received from ${senderAgent.name}`,
       type: 'Agent Transfer',
@@ -328,7 +330,7 @@ const transferToAgent = async (req, res) => {
       console.error('Audit log error (non-critical):', auditError);
     }
 
-    res.json({ 
+    res.json({
       message: 'Transfer successful',
       senderBalance: senderBalance - transferAmount,
       receiverBalance: receiverBalance + transferAmount,
@@ -338,7 +340,7 @@ const transferToAgent = async (req, res) => {
     console.error('Error stack:', error.stack);
     // Check if transfer entries were created
     try {
-      const recentEntries = await Ledger.find({ 
+      const recentEntries = await Ledger.find({
         $or: [
           { agent: req.body.senderAgentId },
           { agent: req.body.receiverAgentId }
@@ -348,7 +350,7 @@ const transferToAgent = async (req, res) => {
         .limit(2);
       if (recentEntries.length >= 2) {
         // Transfer was created, return success
-        return res.json({ 
+        return res.json({
           message: 'Transfer successful',
           senderBalance: 0,
           receiverBalance: 0,
@@ -361,10 +363,170 @@ const transferToAgent = async (req, res) => {
   }
 };
 
+// @desc    Update ledger entry (Only for Top-ups)
+// @route   PUT /api/ledger/:id
+// @access  Public (Should be restricted to Admin/Finance in production)
+const updateLedgerEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, description, reason } = req.body;
+
+    const entry = await Ledger.findById(id);
+
+    if (!entry) {
+      return res.status(404).json({ message: 'Ledger entry not found' });
+    }
+
+    // Only allow editing Top-up or Agent Transfer types
+    const allowedTypes = ['Top-up', 'Virtual Top-up', 'Agent Transfer'];
+    if (!allowedTypes.includes(entry.type)) {
+      return res.status(400).json({ message: 'This type of ledger entry cannot be edited' });
+    }
+
+    const updatedData = {};
+    if (amount !== undefined) updatedData.amount = parseFloat(amount);
+
+    // Handle description update
+    if (entry.type === 'Agent Transfer') {
+      // For transfers, we don't usually change description via direct reason
+      // but if provided, we append it or use it wisely.
+      // Usually only amount is changed for transfers.
+    } else {
+      if (description) updatedData.description = description;
+      else if (reason) updatedData.description = `Top-up: ${reason}`;
+    }
+
+    // Update the main entry
+    const updatedEntry = await Ledger.findByIdAndUpdate(
+      id,
+      { $set: updatedData },
+      { new: true }
+    );
+
+    // If it's an Agent Transfer, find and update the twin entry
+    if (entry.type === 'Agent Transfer' && entry.lrNumber) {
+      try {
+        const twinEntry = await Ledger.findOne({
+          lrNumber: entry.lrNumber,
+          _id: { $ne: entry._id },
+          type: 'Agent Transfer',
+          amount: entry.amount // Match original amount to be sure
+        });
+
+        if (twinEntry) {
+          const twinUpdatedData = { amount: updatedData.amount };
+          await Ledger.findByIdAndUpdate(twinEntry._id, { $set: twinUpdatedData });
+          console.log(`Updated twin transfer entry: ${twinEntry._id}`);
+        }
+      } catch (twinError) {
+        console.error('Error updating twin transfer entry:', twinError);
+      }
+    }
+
+    // Create audit log
+    try {
+      const userId = req.body.userId || null;
+      const userRole = req.body.userRole || 'Admin';
+      await createAuditLog(
+        userId,
+        userRole,
+        'Update Ledger Entry',
+        'Ledger',
+        id,
+        {
+          previousAmount: entry.amount,
+          newAmount: updatedData.amount,
+          previousDescription: entry.description,
+          newDescription: updatedData.description,
+        },
+        req.ip
+      );
+    } catch (auditError) {
+      console.error('Audit log error (non-critical):', auditError);
+    }
+
+    res.json(updatedEntry);
+  } catch (error) {
+    console.error('Update ledger entry error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Delete ledger entry (Only for Top-ups)
+// @route   DELETE /api/ledger/:id
+// @access  Public (Should be restricted to Admin/Finance in production)
+const deleteLedgerEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const entry = await Ledger.findById(id);
+
+    if (!entry) {
+      return res.status(404).json({ message: 'Ledger entry not found' });
+    }
+
+    // Only allow deleting Top-up or Agent Transfer types
+    const allowedTypes = ['Top-up', 'Virtual Top-up', 'Agent Transfer'];
+    if (!allowedTypes.includes(entry.type)) {
+      return res.status(400).json({ message: 'This type of ledger entry cannot be deleted' });
+    }
+
+    // If it's an Agent Transfer, find and delete the twin entry first
+    if (entry.type === 'Agent Transfer' && entry.lrNumber) {
+      try {
+        const twinEntry = await Ledger.findOne({
+          lrNumber: entry.lrNumber,
+          _id: { $ne: entry._id },
+          type: 'Agent Transfer',
+          amount: entry.amount
+        });
+
+        if (twinEntry) {
+          await Ledger.findByIdAndDelete(twinEntry._id);
+          console.log(`Deleted twin transfer entry: ${twinEntry._id}`);
+        }
+      } catch (twinError) {
+        console.error('Error deleting twin transfer entry:', twinError);
+      }
+    }
+
+    await Ledger.findByIdAndDelete(id);
+
+    // Create audit log
+    try {
+      const userId = req.query.userId || null;
+      const userRole = req.query.userRole || 'Admin';
+      await createAuditLog(
+        userId,
+        userRole,
+        'Delete Ledger Entry',
+        'Ledger',
+        id,
+        {
+          amount: entry.amount,
+          type: entry.type,
+          description: entry.description,
+          agent: entry.agent,
+        },
+        req.ip
+      );
+    } catch (auditError) {
+      console.error('Audit log error (non-critical):', auditError);
+    }
+
+    res.json({ message: 'Ledger entry deleted successfully' });
+  } catch (error) {
+    console.error('Delete ledger entry error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getLedger,
   getAgentBalance,
   addTopUp,
   transferToAgent,
+  updateLedgerEntry,
+  deleteLedgerEntry,
 };
 
