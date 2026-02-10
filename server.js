@@ -32,6 +32,7 @@ app.use('/api/disputes', require('./routes/disputeRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/audit-logs', require('./routes/auditLogRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
+app.use('/api/banks', require('./routes/bankRoutes'));
 
 // Health check
 app.get('/api/health', (req, res) => {

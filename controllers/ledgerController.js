@@ -369,7 +369,7 @@ const transferToAgent = async (req, res) => {
 const updateLedgerEntry = async (req, res) => {
   try {
     const { id } = req.params;
-    const { amount, description, reason } = req.body;
+    const { amount, description, reason, bank } = req.body;
 
     const entry = await Ledger.findById(id);
 
@@ -385,6 +385,7 @@ const updateLedgerEntry = async (req, res) => {
 
     const updatedData = {};
     if (amount !== undefined) updatedData.amount = parseFloat(amount);
+    if (bank !== undefined) updatedData.bank = bank;
 
     // Handle description update
     if (entry.type === 'Agent Transfer') {
