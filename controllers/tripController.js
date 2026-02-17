@@ -85,7 +85,7 @@ const getCompanyNames = async (req, res) => {
 // @access  Public
 const getTrips = async (req, res) => {
   try {
-    const { agentId, branch, status, lrNumber, page = 1, limit = 50, startDate, endDate, lrSheet } = req.query;
+    const { agentId, branch, status, lrNumber, page = 1, limit = 20, startDate, endDate, lrSheet } = req.query;
     let query = {};
 
     // No role-based filtering - all trips visible to all
@@ -158,8 +158,16 @@ const getTrips = async (req, res) => {
       };
     });
 
-    // Return array format for frontend compatibility
-    res.json(transformedTrips);
+    // Return object with data and pagination info
+    res.json({
+      data: transformedTrips,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
     console.error('Get trips error:', error);
     res.status(500).json({ message: 'Server error' });

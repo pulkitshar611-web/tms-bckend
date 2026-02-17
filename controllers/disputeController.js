@@ -7,7 +7,7 @@ const { createAuditLog } = require('../middleware/auditLog');
 // @access  Public
 const getDisputes = async (req, res) => {
   try {
-    const { agentId, status } = req.query;
+    const { agentId, status, page = 1, limit = 20 } = req.query;
     let query = {};
 
     // No role-based filtering - all disputes visible to all
@@ -24,7 +24,11 @@ const getDisputes = async (req, res) => {
       .populate('agentId', 'name email phone branch _id')
       .populate('tripId', 'lrNumber route status _id')
       .populate('resolvedBy', 'name role _id')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Dispute.countDocuments(query);
 
     // Transform disputes to match frontend expectations
     const transformedDisputes = disputes.map(dispute => ({
@@ -35,7 +39,16 @@ const getDisputes = async (req, res) => {
       tripId: dispute.tripId?._id || dispute.tripId,
     }));
 
-    res.json(transformedDisputes);
+    // Return object with data and pagination info
+    res.json({
+      data: transformedDisputes,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
     console.error('Get disputes error:', error);
     res.status(500).json({ message: 'Server error' });

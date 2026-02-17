@@ -8,7 +8,7 @@ const { createAuditLog } = require('../middleware/auditLog');
 // @access  Public
 const getLedger = async (req, res) => {
   try {
-    const { agentId, date, lrNumber, page = 1, limit = 100 } = req.query;
+    const { agentId, date, lrNumber, page = 1, limit = 20 } = req.query;
     let query = {};
 
     // No role-based filtering - all entries visible to all
@@ -45,8 +45,16 @@ const getLedger = async (req, res) => {
       agent: entry.agent?.name || entry.agentId?.name || entry.agent,
     }));
 
-    // Return array format for frontend compatibility
-    res.json(transformedLedger);
+    // Return object with data and pagination info
+    res.json({
+      data: transformedLedger,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
     console.error('Get ledger error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -115,7 +123,13 @@ const addTopUp = async (req, res) => {
     }
 
     const amountNum = parseFloat(amount);
-    const currentDate = new Date();
+
+    // Use provided date or default to current date
+    let currentDate = new Date();
+    if (req.body.date) {
+      // Create date from string to ensure it's recorded correctly
+      currentDate = new Date(req.body.date);
+    }
 
     if (isVirtual) {
       // Virtual Top-up: Credit + Immediate Debit
