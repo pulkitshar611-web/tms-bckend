@@ -12,7 +12,8 @@ const app = express();
 // Middleware
 const allowedOrigins = [
   "https://app.nkmlt.com",
-  "https://api.nkmlt.com"
+  "https://api.nkmlt.com",
+  "http://localhost:3000"
 ];
 const corsOptions = {
   origin: function (origin, callback) {
