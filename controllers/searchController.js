@@ -1,6 +1,5 @@
 const Trip = require('../models/Trip');
 const Ledger = require('../models/Ledger');
-const mongoose = require('mongoose');
 
 // @desc    Global LR search - search across all trips and ledger entries
 // @route   GET /api/search/lr/:lrNumber
@@ -50,7 +49,6 @@ const globalLRSearch = async (req, res) => {
     { lrNumber: new RegExp(searchTerm, 'i') }
   ]
 };
-
 // If searchTerm is valid ObjectId, search by tripId also
 if (mongoose.Types.ObjectId.isValid(searchTerm)) {
   ledgerQuery.$or.push({ tripId: searchTerm });

@@ -136,6 +136,7 @@ const getTrips = async (req, res) => {
     const trips = await Trip.find(query)
       .populate('agent', 'name email phone branch _id')
       .populate('agentId', 'name email phone branch _id')
+      .populate('onTripPayments.addedBy', 'name role _id')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
@@ -145,7 +146,12 @@ const getTrips = async (req, res) => {
 
     // Transform trips to match frontend expectations
     const transformedTrips = trips.map(trip => {
-      // Since we used lean(), trip is already a plain object
+      // Transform payments.addedBy from object to string (like in transformTrip)
+      const transformedPayments = trip.onTripPayments?.map(payment => ({
+        ...payment,
+        addedBy: payment.addedBy?.name || payment.addedBy || payment.addedByRole || 'Unknown',
+      })) || trip.onTripPayments;
+
       return {
         ...trip,
         id: trip._id,
@@ -153,6 +159,7 @@ const getTrips = async (req, res) => {
         agent: trip.agent?.name || trip.agentId?.name || trip.agent,
         // Ensure agent object is available for frontend
         agentDetails: trip.agent || trip.agentId,
+        onTripPayments: transformedPayments,
         // Explicitly include driverPhoneNumber
         driverPhoneNumber: trip.driverPhoneNumber || null,
       };

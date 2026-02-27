@@ -37,6 +37,24 @@ const getLedger = async (req, res) => {
 
     const total = await Ledger.countDocuments(query);
 
+    // Compute grand totals across ALL matching records (not just current page)
+    const totalsAgg = await Ledger.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: '$direction',
+          total: { $sum: '$amount' },
+        },
+      },
+    ]);
+
+    let totalCredit = 0;
+    let totalDebit = 0;
+    totalsAgg.forEach(row => {
+      if (row._id === 'Credit') totalCredit = row.total;
+      if (row._id === 'Debit') totalDebit = row.total;
+    });
+
     // Transform ledger entries to match frontend expectations
     const transformedLedger = ledger.map(entry => ({
       ...entry.toObject(),
@@ -54,12 +72,17 @@ const getLedger = async (req, res) => {
         limit: Number(limit),
         pages: Math.ceil(total / limit),
       },
+      totals: {
+        totalCredit,
+        totalDebit,
+      },
     });
   } catch (error) {
     console.error('Get ledger error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 // @desc    Get agent balance
 // @route   GET /api/ledger/balance/:agentId
