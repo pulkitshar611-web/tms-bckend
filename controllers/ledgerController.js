@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Ledger = require('../models/Ledger');
 const User = require('../models/User');
 const Trip = require('../models/Trip');
@@ -13,7 +14,12 @@ const getLedger = async (req, res) => {
 
     // No role-based filtering - all entries visible to all
     if (agentId) {
-      query.agent = agentId;
+      // Cast to ObjectId for aggregate to work correctly
+      try {
+        query.agent = new mongoose.Types.ObjectId(agentId);
+      } catch (err) {
+        query.agent = agentId; // Fallback if not a valid ObjectId string
+      }
     }
 
     // Additional filters
@@ -43,7 +49,16 @@ const getLedger = async (req, res) => {
       {
         $group: {
           _id: '$direction',
-          total: { $sum: '$amount' },
+          total: {
+            $sum: {
+              $convert: {
+                input: '$amount',
+                to: 'double',
+                onError: 0,
+                onNull: 0
+              }
+            }
+          },
         },
       },
     ]);
